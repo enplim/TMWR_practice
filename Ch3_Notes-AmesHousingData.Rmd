@@ -1,0 +1,59 @@
+---
+title: "Notes on Ch4 - The Ames Housing Data"
+author: "N_Lim"
+date: "2025-06-25"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Loading the data:
+```{r}
+library(modeldata)
+data(ames)
+```
+
+checking the data
+```{r}
+dim(ames)
+```
+
+basic EDA on ames data
+```{r}
+# Load packages
+library(tidymodels)
+tidymodels_prefer()
+```
+
+Actual start of EDA
+```{r}
+ggplot(ames, aes(x = Sale_Price)) +
+  geom_histogram(bins = 50, col = "white")
+```
+
+Observations on the plot:
+- data are right-skewed
+- there are more expensive houses in the dataset than inexpensive ones
+- log-transforming the data first before modeling is a good decision
+- log-transformation will also stabilize the variance in the data, making our inference more 'legit'
+
+Plot of log-transformed data:
+```{r}
+ggplot(ames, aes(x = Sale_Price)) +
+  geom_histogram(bins = 50, col = "white") +
+  scale_x_log10()
+```
+
+While not perfect, the data looks closer to bell curve now...
+
+Proceeding to log-transform the data:
+```{r}
+ames <- ames |> 
+  mutate(Sale_Price = log10(Sale_Price))
+```
+
+
+
+
+
+
