@@ -6,7 +6,7 @@ Introduction
 -[ ] 2. A Tidyverse Primer  
 -[/] 3. A Review of R Modeling Fundamentals  
 
-Modeling Basics
+Modeling Basics  
 -[ ] 4. The Ames Housing Data  
 -[ ] 5. Spending our Data  
 -[ ] 6. Fitting Models with parsnip  
