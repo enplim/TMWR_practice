@@ -1,7 +1,7 @@
 # TMWR_practice
 Notes from the book Tidy Modeling with R (Kuhn and Silge)
 
-Introduction
+Introduction  
 -[ ] 1. Software for modeling  
 -[ ] 2. A Tidyverse Primer  
 -[/] 3. A Review of R Modeling Fundamentals  
@@ -14,7 +14,7 @@ Modeling Basics
 -[ ] 8. Feature Engineering with recipes  
 -[ ] 9. Judging Model Effectiveness  
 
-Tools for Creating Effective Models
+Tools for Creating Effective Models  
 -[ ] 10. Resampling for Evaluating Performance  
 -[ ] 11. Comparing Models with Resampling  
 -[ ] 12. Model Tuning and the Dangers of Overfitting  
