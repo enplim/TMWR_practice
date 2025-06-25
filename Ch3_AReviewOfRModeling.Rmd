@@ -3,8 +3,8 @@ title: 'Notes on Ch3: A Review of R Modeling Fundamentals'
 author: "N_Lim"
 date: "2025-06-24"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 
 ## Fundamentals
