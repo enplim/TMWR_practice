@@ -17,8 +17,6 @@ Chambers and Hastie (of the ISLR fame?) published the "White Book" on data analy
 Exeprimental data on the relationship between the ambient temp and cricket chirp rate (per minute) on two species: *O. exclamationis* and *O. niveus*. Data frame `crickets` has 31 data points. 
 
 ```{r}
-knitr::opts_chunk$set(eval = FALSE)
-
 library(tidyverse)
 
 data(crickets, package = "modeldata")
@@ -133,7 +131,6 @@ Wickham's Design-for-Humans rubric specifies the following goals of tidymodels d
 
 Example showing the power of tidy functions:
 ```{r}
-library(purrr)
 # traditional method
 corr_res <- map(mtcars %>% select(-mpg), cor.test, y = mtcars$mpg)
 corr_res[[1]]
@@ -141,6 +138,8 @@ corr_res[[1]]
 
 Using `tidy()` method:
 ```{r}
+library(broom)
+
 tidy(corr_res[[1]])
 ```
 
