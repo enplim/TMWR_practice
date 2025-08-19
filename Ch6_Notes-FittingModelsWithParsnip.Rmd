@@ -1,0 +1,177 @@
+---
+title: 'Notes on Ch  6: Fitting Models with parsnip'
+author: "The Caveman Coder"
+date: "2025-08-19"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Syntax for a linear regression model using `lm()`:
+```r
+model <- lm(formula, data, ...)
+```
+
+Syntax for a linear regression model with regularization:
+```r
+# Using the rstanarm package (Bayesian model):
+model <- stan_glm(formula, data, family = "gaussian", ...)
+
+# Using the glmnet package (non-Bayesian model)
+model <- glmnet(x = matrix, y = vector, family = "gaussian", ...)
+```
+
+### Prerequisites
+```{r}
+library(tidymodels)
+tidymodels_prefer()
+```
+
+
+General steps when modeling using the tidymodels approach:  
+
+1. Specify the type of model based on its mathematical structure (i.e., linear regression, random forest, KNN, etc.).  
+2. Specify the engine for fitting the model. This, most often reflects the software package that should be used, like Stan, glmnet, or others.   
+3. When required, declare the mode of the model (i.e., the type of prediction outcome - if numeric, "regression"; if qualitative, "classification").
+
+
+
+### Example: Walkthrough on predicting sale of house prices
+
+This is a walkthrough example on making a predictiion model for house prices based on longitude and latitude using the Ames data:
+```{r}
+data(ames)
+glimpse(ames)
+
+ames <- ames |> mutate(Sale_Price = log10(Sale_Price))
+```
+
+Splitting the data into training and testing sets:
+```{r}
+set.seed(502)
+
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+dim(ames_train)
+dim(ames_test)
+```
+
+Creating the model:
+```{r}
+lm_model <- 
+  linear_reg() |> 
+  set_engine("lm")
+
+lm_form_fit <- 
+  lm_model |> 
+  fit(Sale_Price ~ Longitude + Latitude, data = ames_train)
+
+lm_xy_fit <- 
+  lm_model |> 
+  fit_xy(
+    x = ames_train |> select(Longitude, Latitude),
+    y = ames_train |> pull(Sale_Price)
+  )
+
+lm_form_fit
+lm_xy_fit
+```
+
+
+The interface from different packages used for the models above are consistent -- this is due to the parsnip package.
+
+
+### Using the model results
+
+Extracting the model fitting results using `extract_fit_engine()`:
+```{r}
+lm_form_fit |> extract_fit_engine()
+lm_xy_fit |> extract_fit_engine()
+```
+
+Normal methods can be applied to the extracted results:
+```{r}
+lm_form_fit |> extract_fit_engine() |> vcov()
+lm_xy_fit |> extract_fit_engine() |> vcov()
+```
+
+Extracting the results using the `summary()` method:
+```{r}
+model_res <-
+  lm_form_fit |> 
+  extract_fit_engine() |> 
+  summary()
+
+model_res
+```
+
+Acessing the model coefficient table using the `coef()` method:
+```{r}
+param_est <- coef(model_res)
+class(param_est)
+param_est
+```
+
+Notice that the column names of the result are not valid names for a dataframe in R. Also, the p-value colummn might end up with a different name had we used another model.  This is not ideal when we are collecting results from different models. 
+
+The solution is to use the **broom** package which can convert many types of model objects into a tidy structure. Using this package on our example:
+```{r}
+tidy(lm_form_fit)
+```
+
+
+### Making predictions
+
+Model prediction is generally performed using the `predict()` method. In parsnip, predictions are always performed under these rules:  
+
+1. The results are always a tibble.  
+2. The column names of the tibble are always predictable (or consistent).  
+3. There are always as many rows in the tibble as there are in the input data set.  
+
+Example:
+```{r}
+ames_test_small <- ames_test |> slice(1:5)
+predict(lm_form_fit, new_data = ames_test_small)
+```
+
+The three rules make it easy to merge the predictions with the original data:
+```{r}
+ames_test_small |> 
+  select(Sale_Price) |> 
+  bind_cols(predict(lm_form_fit, ames_test_small)) |> 
+  # add 95% prediction intervals to the results:
+  bind_cols(predict(lm_form_fit, ames_test_small, type = "pred_int"))
+```
+
+Example using a decision tree:
+```{r}
+tree_model <- 
+  decision_tree(min_n = 2) |> 
+  set_engine("rpart") |> 
+  set_mode("regression")
+
+tree_fit <- 
+  tree_model |> 
+  fit(Sale_Price ~ Longitude + Latitude, data = ames_train)
+
+ames_test_small |> 
+  select(Sale_Price) |> 
+  bind_cols(predict(tree_fit, ames_test_small))
+```
+
+
+### Parsnip extension packages
+
+The **descrim** package, for example, has model definitions for the family of classification techniques called discrimininant analysis methods.  
+
+
+### Creating model specifications
+
+From the *Addins* toolbar menu of RStudio, we can see a list of possible models for each model mode. These can be written to the source code panel.  
+
+
+
+
