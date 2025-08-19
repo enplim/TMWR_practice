@@ -10,7 +10,7 @@ Modeling Basics
 - [x] 4. The Ames Housing Data  
 - [x] 5. Spending our Data  
 - [x] 6. Fitting Models with parsnip  
-- [ ] 7. A Model Workflow  
+- [x] 7. A Model Workflow  
 - [ ] 8. Feature Engineering with recipes  
 - [ ] 9. Judging Model Effectiveness  
 

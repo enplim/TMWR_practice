@@ -1,0 +1,225 @@
+---
+title: 'Notes on Ch7: Workflow Basics'
+author: "The Caveman Coder"
+date: "2025-08-19"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Why are workflows important?  
+
+- it encourages good methodology since it is a single point of entry to the components of data analysis.  
+- it enables the user to better organize projects.  
+
+
+## Workflow basics
+
+Setting up the libraries and the dataset:
+```{r}
+library(tidymodels)
+tidymodels_prefer()
+data(ames)
+
+ames <- mutate(ames, Sale_Price = log10(Sale_Price))
+
+set.seed(502)
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+```
+
+
+Setting up the model engine:
+```{r}
+lm_model <- 
+  linear_reg() |> 
+  set_engine("lm")
+```
+
+Setting up the workflow (this always requires a parsnip model object):
+```{r}
+lm_wflow <- 
+  workflow() |> 
+  add_model(lm_model)
+
+lm_wflow
+```
+
+Adding the formula to the workflow:
+```{r}
+lm_wflow <-
+  lm_wflow |> 
+  add_formula(Sale_Price ~ Longitude + Latitude)
+```
+
+Creating the model by fitting the training data to the parsnip model object:
+```{r}
+lm_fit <- fit(lm_wflow, ames_train)
+lm_fit
+```
+
+Making predictions with the model:
+```{r}
+predict(lm_fit, ames_test |> slice(1:3))
+```
+
+Updating the model and preprocessor:
+```{r}
+lm_fit |> update_formula(Sale_Price ~ Longitude)
+```
+
+
+### Adding raw variables to the `workflow()`
+
+We can do this using the `add_variables()` function. This has two primary arguments: `outcome` and `predictors`. 
+
+Example:
+```{r}
+lm_wflow <- 
+  lm_wflow |> 
+  remove_formula() |> 
+  add_variables(outcome = Sale_Price, predictors =c(Longitude, Latitude))
+
+lm_wflow
+```
+
+
+There are many wasy to specify the predictors. For example, it could have beens specified as:
+```r
+predictors = c(ends_width("tude))
+```
+Or as:
+```r
+predictors = everything()
+```
+
+Updating the model by fitting the training data to the updated parsnip model object:
+```{r}
+fit(lm_wflow, ames_train)
+```
+
+
+### Special formulas and inline functions
+
+Fitting a regression model that has random effects for subject, to the `Orthodont` data:
+```{r}
+library(nlme)
+data("Orthodont")
+
+library(lme4)
+lmer(distance ~ Sex + (age | Subject), data = Orthodont)
+```
+
+The problem with this approach is that standard R can't properly process this formula:
+```{r}
+model.matrix(distance ~ Sex + (age | Subject), data = Orthodont)
+```
+
+The solution in workflows is using an optional supplementary model that can be passed to `add_model()`. The `add_variables()` can do the trick:
+```{r}
+library(multilevelmod)
+
+multilevel_spec <- linear_reg() |>  set_engine("lmer")
+
+multilevel_workflow <- 
+  workflow() |> 
+  # Pass the data along as-is: 
+  add_variables(outcome = distance, predictors = c(Sex, age, Subject)) |> 
+  add_model(multilevel_spec, 
+            # This formula is given to the model
+            formula = distance ~ Sex + (age | Subject))
+
+multilevel_fit <- fit(multilevel_workflow, data = Orthodont)
+multilevel_fit
+```
+
+
+Another example using the `strata()` function from the **survival** package:
+```{r}
+library(censored)
+
+parametric_spec <- survival_reg()
+
+parametric_workflow <- 
+  workflow() |> 
+  add_variables(outcome = c(fustat, futime), predictors = c(age, rx)) |> 
+  add_model(parametric_spec,
+            formula = Surv(futime, fustat) ~ age + strata(rx))
+
+parametric_fit <- fit(parametric_workflow, data = ovarian)
+parametric_fit
+```
+
+
+### Creating multiple workflows at once
+
+Example: modeling the different ways that house location is represented in the Ames dataset.
+
+Creating a list of formulas that capture the predictors:
+```{r}
+location <- list(
+  longitude = Sale_Price ~ Longitude,
+  latitude = Sale_Price ~ Latitude,
+  coords = Sale_Price ~ Longitude + Latitude,
+  neighborhood = Sale_Price ~ Neighborhood
+)
+```
+
+Using the `workflowsets` library to be able to cross the representations above with one or more models with the `workflow_set()` function:
+```{r}
+library(workflowsets)
+
+location_models <- workflow_set(preproc = location, models = list(lm = lm_model))
+
+location_models
+```
+
+
+We can "see" deeper into these workflow sets:
+```{r}
+location_models$info[[1]]
+```
+
+We can extract the model details using `extract_workflow()`:
+```{r}
+extract_workflow(location_models, id = "coords_lm")
+```
+
+
+Creating model "fits" for each formula and saving them in a new column called `fit`:
+```{r}
+location_models <- 
+  location_models |> 
+  mutate(fit = map(info, ~ fit(.x$workflow[[1]], ames_train)))
+
+location_models
+```
+
+Again, we can "see" the model details using base R functions:
+```{r}
+location_models$fit[[1]]
+```
+
+
+## Evaluating the test set
+
+Using the function called `last_fit()` to fit the model to the entire training set and evaluate it with the testing set:
+```{r}
+final_lm_res <- last_fit(lm_wflow, ames_split)
+final_lm_res
+```
+
+Note: the `last_fit()` function takes a data split object as an input -- not a dataframe.
+
+Pulling out the `.workflow` column from the results using `extract_workflow()`:
+```{r}
+fitted_lm_wflow <- extract_workflow(final_lm_res)
+```
+
+Collecting the predictions and metrics:
+```{r}
+collect_metrics(final_lm_res)
+collect_predictions(final_lm_res) |> slice(1:5)
+```
+
