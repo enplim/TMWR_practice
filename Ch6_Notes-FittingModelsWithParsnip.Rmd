@@ -165,7 +165,7 @@ ames_test_small |>
 
 ### Parsnip extension packages
 
-The **descrim** package, for example, has model definitions for the family of classification techniques called discrimininant analysis methods.  
+The **descrim** package, for example, has model definitions for the family of classification techniques called discriminant analysis methods.  
 
 
 ### Creating model specifications
