@@ -11,8 +11,8 @@ Modeling Basics
 - [x] 5. Spending our Data  
 - [x] 6. Fitting Models with parsnip  
 - [x] 7. A Model Workflow  
-- [ ] 8. Feature Engineering with recipes  
-- [ ] 9. Judging Model Effectiveness  
+- [x] 8. Feature Engineering with recipes  
+- [x] 9. Judging Model Effectiveness  
 
 Tools for Creating Effective Models  
 - [ ] 10. Resampling for Evaluating Performance  

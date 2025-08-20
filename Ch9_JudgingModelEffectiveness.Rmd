@@ -1,0 +1,251 @@
+---
+title: 'Notes on Chapter 9: Judging Model Effectiveness'
+author: "The Caveman Coder"
+date: "2025-08-20"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Regression metrics
+
+Previous code from Chapter 8:
+```{r}
+library(tidymodels)
+tidymodels_prefer()
+
+data(ames)
+ames <- mutate(ames, Sale_Price = log10(Sale_Price))
+
+set.seed(502)
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+ames_rec <- 
+  recipe(
+    Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + Longitude + Latitude,
+    data = ames_train
+  ) |> 
+  step_log(Gr_Liv_Area, base = 10) |> 
+  step_other(Neighborhood, threshold = 0.01) |> 
+  step_dummy(all_nominal_predictors()) |> 
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_")) |> 
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+lm_model <- linear_reg() |> set_engine("lm") 
+
+lm_wflow <-
+  workflow() |> 
+  add_model(lm_model) |> 
+  add_recipe(ames_rec)
+
+lm_fit <- fit(lm_wflow, ames_train)
+```
+
+
+Predicting results on the test set:
+```{r}
+ames_test_res <- predict(lm_fit, new_data = ames_test)
+ames_test_res
+```
+
+Matching the predicted outcome with the corresponding observed outcome:
+```{r}
+ames_test_res <- bind_cols(ames_test_res, ames_test |> select(Sale_Price))
+
+ames_test_res
+```
+
+Plotting the prediction vs observed outcome:
+```{r}
+ggplot(ames_test_res, aes(x = Sale_Price, y = .pred)) +
+  # Create a diagonal line:
+  geom_abline(lty = 2) +
+  geom_point(alpha = 0.5) +
+  labs(
+    y = "Predicted Sale Price (log10)",
+    x = "Sale Price (log10)"
+  ) +
+  coord_obs_pred()
+```
+
+Computing for the root mean squared error using `rmse()`:
+```{r}
+rmse(ames_test_res, truth = Sale_Price, estimate = .pred)
+```
+
+
+Computing for multiple metrics by creating a *metric set*:
+```{r}
+ames_metrics <- metric_set(rmse, rsq, mae)
+ames_metrics(ames_test_res, truth = Sale_Price, estimate = .pred)
+```
+
+
+The rmse and mae metrics are both on the scale of the outcome (`log10(Sale_Price)`). The rsq metric measures the squared correlation between the predicted and observed values, so the closer it is to 1, the better.  
+
+The **yardstick** package does not contain a function for *adjusted R^2* since this modified coefficient of determination commonly uses the same data for training and testing. It is always better to judge the performance of the models using a separate dataset than the one used to fit the model.
+
+
+## Binary classification metrics
+
+Showing a model evaluation result from the **modeldata** package:
+```{r}
+data("two_class_example")
+tibble(two_class_example)
+```
+
+In the example, there are two predicted class probabilities -- `Class1` and `Class2`.  
+
+Creating a confusion matrix from the sample two-class prediction results:
+```{r}
+conf_mat(two_class_example, truth = truth, estimate = predicted)
+```
+
+Other **yardstick** "measures" of model effectiveness:
+```{r}
+# Accuracy:
+accuracy(two_class_example, truth, predicted)
+
+# Matthews correlation coefficient:
+mcc(two_class_example, truth, predicted)
+
+# F1 metric:
+f_meas(two_class_example, truth, predicted)
+```
+
+Combining the three classification metrics in a metric set:
+```{r}
+classification_metrics <- metric_set(accuracy, mcc, f_meas)
+classification_metrics(two_class_example, truth = truth, estimate = predicted)
+```
+
+
+The default behavior of these functions it to have the positive class, or the event of interest, as the first level of outcome, but this behavior can be changed, if desired, by specifying the `event_level`. 
+
+Example showing different settings for `event_level`:
+```{r}
+# event_level = "first"
+f_meas(two_class_example, truth, predicted)
+
+# event_level = "second"
+f_meas(two_class_example, truth, predicted, event_level = "second")
+```
+
+
+Calculating the ROC and ROC-AUC for the sample result:
+```{r}
+# ROC 
+two_class_curve <- roc_curve(two_class_example, truth, Class1)
+two_class_curve
+
+# ROC-AUC
+roc_auc(two_class_example, truth, Class1)
+```
+
+Plotting the ROC:
+```{r}
+# ROC plot
+autoplot(two_class_curve)
+```
+
+Since the plot is not close to the diagonal line, we can say that our model performs well at different thresholds.  
+
+
+
+## Multiclass classification metrics
+
+A prediction result with four classes:
+```{r}
+data("hpc_cv")
+tibble(hpc_cv)
+```
+
+
+Metrics for discrete class predictions are identical to their binary counterparts:
+```{r}
+# Accuracy
+accuracy(hpc_cv, obs, pred)
+
+# MCC
+mcc(hpc_cv, obs, pred)
+```
+
+
+Othe methods that can be used to apply sensitivity (i.e. the true positive rate):
+
+- macro-averaging: computes the average of a set of one-versus-all metrics using the standard two-class statistics.  
+- macro-weighted averaging: does the same as macro-averaging, but the average is weighted by the number of samples in each class.
+- micro-averaging: computes for the contribution for each class, then aggregates them, then computes a single metric from the aggregates.  
+
+Manually calculating these averaging methods:
+```{r}
+class_totals <- 
+  count(hpc_cv, obs, name = "totals") |> 
+  mutate(class_wts = totals / sum(totals))
+
+class_totals
+
+cell_counts <- 
+  hpc_cv |> 
+  group_by(obs, pred) |> 
+  count() |> 
+  ungroup()
+
+cell_counts
+
+# Compute the four sensitivities using 1-vs-all:
+one_versus_all <- 
+  cell_counts |> 
+  filter(obs == pred) |> 
+  full_join(class_totals, by = "obs") |> 
+  mutate(sens = n / totals)
+
+one_versus_all
+
+# Three different estimates:
+one_versus_all |> 
+  summarize(
+    macro = mean(sens),
+    macro_wts = weighted.mean(sens, class_wts),
+    micro = sum(n) / sum(totals)
+  )
+```
+
+
+Whew! Thankfully, the **yarstick** functions can automatically compute for these metrics using the `estimator` argument:
+```{r}
+sensitivity(hpc_cv, obs, pred, estimator = "macro")
+sensitivity(hpc_cv, obs, pred, estimator = "macro_weighted")
+sensitivity(hpc_cv, obs, pred, estimator = "micro")
+```
+
+
+Calculating the roc-auc for the multiclass case:
+```{r}
+roc_auc(hpc_cv, obs, VF, F, M, L)
+```
+
+Applying the macro-weighted average to the multiclass roc-auc outcome:
+```{r}
+roc_auc(hpc_cv, obs, VF, F, M, L, estimator = "macro_weighted")
+```
+
+Calculating performance metrics on a per-fold basis (note: in the example, the result was generated using a k-fold cross-validation technique):
+```{r}
+hpc_cv |> 
+  group_by(Resample) |> 
+  accuracy(obs, pred)
+```
+
+Plotting the ROC curves for each fold:
+```{r}
+hpc_cv |> 
+  group_by(Resample) |> 
+  roc_curve(obs, VF, F, M, L) |> 
+  autoplot()
+```
+
+
+Based on the results, the `VF` class is predicted better than the other classes.
