@@ -2,8 +2,8 @@
 Notes from the book Tidy Modeling with R (Kuhn and Silge)
 
 Introduction  
-- [ ] 1. Software for modeling  
-- [ ] 2. A Tidyverse Primer  
+- [x] 1. Software for modeling  
+- [x] 2. A Tidyverse Primer  
 - [x] 3. A Review of R Modeling Fundamentals  
 
 Modeling Basics  
