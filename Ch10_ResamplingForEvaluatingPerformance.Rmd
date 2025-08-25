@@ -1,0 +1,404 @@
+---
+title: 'Notes on Ch 10: Resampling for Evaluating Performance'
+author: "The Caveman Coder"
+date: "2025-08-20"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+## The resubstitution approach
+
+Resubstitution simply means using the same data used for training the model, to measure how well the model performs. 
+
+Example: Using a random forest model on the Ames dataset:
+```{r}
+library(tidymodels)
+tidymodels_prefer()
+
+ames <- mutate(ames, Sale_Price = log10(Sale_Price))
+
+set.seed(502)
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+rf_model <- 
+  rand_forest(trees = 1000) |> 
+  set_engine("ranger") |> 
+  set_mode("regression")
+
+rf_wflow <-
+  workflow() |> 
+  add_formula(
+    Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + Latitude + Longitude
+  ) |> 
+  add_model(rf_model)
+
+rf_fit <- rf_wflow |> fit(data = ames_train)
+
+# the linear model created in the previous chapter
+ames_rec <-
+  recipe(
+    Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + Latitude + Longitude,
+    data = ames_train
+  ) |> 
+  step_log(Gr_Liv_Area, base = 10) |> 
+  step_other(Neighborhood, threshold = 0.01) |> 
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) |> 
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+lm_model <- linear_reg() |> set_engine("lm")
+
+lm_wflow <- 
+  workflow() |> 
+  add_model(lm_model) |> 
+  add_recipe(ames_rec)
+
+lm_fit <- fit(lm_wflow, ames_train)
+```
+
+Question: How to compare the linear and random forest models? 
+Ans: Make predictions using the training set. This is called an *apparent metric* or *resubstitution metric*. 
+
+Creating a function the generates predictions and formats the results:
+```{r}
+estimate_perf <- function(model, dat) {
+  # Capture the names of the `model` and `dat` objects
+  c1 <- match.call()
+  obj_name <- as.character(c1$model)
+  data_name <- as.character(c1$dat)
+  data_name <- gsub("ames_", "", data_name)
+  
+  # Estimate these metrics:
+  reg_metrics <- metric_set(rmse, rsq)
+  
+  model |> 
+    predict(dat) |> 
+    bind_cols(dat |> select(Sale_Price)) |> 
+    reg_metrics(Sale_Price, .pred) |> 
+    select(-.estimator) |> 
+    mutate(object = obj_name, data = data_name)
+}
+```
+
+Calculating RMSE and $R^2$ and generate the resubstitution statistics:
+```{r}
+estimate_perf(rf_fit, ames_train)
+estimate_perf(lm_fit, ames_train)
+```
+
+Random forest performed better because on the log scale, its RMSE is about half as large as that of the linear model. 
+
+The next verification step is to make predictions using the test data:
+```{r}
+estimate_perf(rf_fit, ames_test)
+estimate_perf(lm_fit, ames_test)
+```
+
+Now, the test set RMSE for the random forest model is much worse. The test set RMSE for the linear model, is more consistent.
+
+Testing the models on the training data will always result in an artificially optimistic estimate of performance (especially compared to test results on a dataset that the model has never "seen" before).
+
+
+## Resampling methods
+
+These are methods of empirical simulation that emulate the process of using some data for modeling and different data for simulation. 
+
+
+### Cross-validation
+
+The most common form is v-fold cross-validation where the data are randomly partitioned into sets roughly equal size (aka the folds), and then a scheme is employed to assign some of the folds for "training" the model, and the other/s for evaluation.
+
+Typical code for splitting the data for v-fold cross-validation (using `vfold_cv()`):
+```{r}
+set.seed(1001)
+ames_folds <- vfold_cv(ames_train, v = 10)
+ames_folds
+```
+
+To manually retrieve the paritioned data, the `analysis()` and `assessment()` functions can be used:
+```{r}
+ames_folds$splits[[1]] |> analysis() |> dim()
+```
+
+
+## Repeated cross-validation
+
+This is a type of v-fold cross-validation where the assignment of training sets and validation sets are performed repeatedly. This effectively reduces the RSME to $\sigma / \sqrt{10R}$ where $R$ is the number of replicates, and $\sigma$ is the standard error.  
+
+Specifying the number of repeats in creating v-fold cross-validation, the argument `repeats` is used:
+```{r}
+vfold_cv(ames_train, v = 10, repeats = 5)
+```
+
+
+### Leave-one-out cross-validation
+
+In this scheme, for each of the folds, one row is taken out, and these removed row is used for validating the model performance. This is computationally expensive and yields inferior results than other v-fold cross-validation methods.  
+
+
+### Monte Carlo cross-validation
+
+This is similar to the regular v-fold cross-validation except that here, the proportion of data allocate to validating the model performance is a fixed value, but randomly selected from the folds. 
+
+Creating Monte Carlo cross-validation:
+```{r}
+mc_cv(ames_train, prop = 9/10, times = 20)
+```
+
+
+### Bootstrapping
+
+A bootstrap sample of a dataset is a sample drawn with replacement from the dataset, having the same size as the source dataset.  
+
+In this setup, each data point has a 63.2% chance of getting included in the sample set at least once.  
+
+This means that if a bootstrap sample is made from the training set, on average, 36.8% of the training set will not be included in the bootstrap sample, and this remaining set, aka the out-of-bag sample, will be used as the assessment set.
+
+From the **rssample**, bootstrap samples can be created using `bootstraps()`:
+```{r}
+bootstraps(ames_train, times = 5)
+```
+
+
+### Rolling forecasting origin resampling
+
+When the data have a strong time component, a resampling method should support modeling to estimate seasonal and other temporal trends within the data -- any technique that randomly samples values from the training set will disrupt the model's ability to "learn" from these patterns.  
+
+- In the technique of rolling forecast origin resampling, the size of the initial analysis and assessment sets are first specified. The first iteration of resampling uses these sizes, starting from the beginning of the series, then on the second iteration, the same data is used, but they are shifted over by a set number of samples. 
+
+Example:  
+First iteration: analysis set -> row 1 to 8; validation set -> row 9 to 11  
+Second iteration: analysis set -> row 2 to 9; validation set -> row 10 to 12  
+And so on...  
+
+
+The resamples need not increment by one. For example, for large datasets, the incremental block could be a week or month instead of a day.  
+
+The resamples can also grow cumulatively instead of remaining similar in size. 
+
+Example: Using the **resample** to create rolling forecast origin resamples composed of six sets of 30-day blocks for the analysis set, and 30 days with a 29-day skip for the assessment set:
+```{r}
+time_slices <- 
+  tibble(x = 1:365) |> 
+  rolling_origin(initial = 6 * 30, assess = 30, skip = 29, cumulative = FALSE)
+
+time_slices
+
+data_range <- function(x) {
+  summarize(x, first = min(x), last = max(x))
+}
+
+map_dfr(time_slices$splits, ~ analysis(.x) |> data_range())
+map_dfr(time_slices$splits, ~ assessment(.x) |> data_range())
+```
+
+
+## Estimating Performance
+
+Resampling process:
+
+1. The analysis set is used to preprocess the data, apply the preprocessing to itself, and use these preprocessed data to fit the model.  
+2. The preprocessing statistics produced by the analysis set are applied to the assessment set. The predictions from the assessment set estimate performance on new data.  
+
+Syntax:  
+```r,
+model_spec |> fit_resamples(formula, resamples, ...)
+model_spec |> fit_resamples(recipe,  resamples, ...)
+workflow |> fit_resamples(            resampes, ...)
+```
+
+Optional arguments:
+- `metrics`: A metric set of performance statistics to compute. Default metrics for regression models are RMSE and $R^2$. Default metrics for classification models compute the area under the ROC and overall accuracy.  
+- `control`: A list created by `control_resamples()` with different arguments.  
+
+Commonly-used control arguments:  
+- `verbose`: prints process log when set to TRUE.  
+- `extract`: Used to retain objects from each model iteration. (To be discussed later)  
+- `save_pred`: Saves the assessment test predictions when set to TRUE.  
+
+Example: saving predictions in order to visualize the model fit and residuals:
+```{r}
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+
+set.seed(1003)
+rf_res <- 
+  rf_wflow |> 
+  fit_resamples(resamples = ames_folds, control = keep_pred) 
+
+rf_res
+```
+
+Reconfiguring the resulting tibble to make it easy to see the metrics:
+```{r}
+collect_metrics(rf_res)
+```
+
+The metrics displayed are the resampling estimates averaged over the indivudual replicates. 
+
+Getting the metrics for each resample using the option `summarize = FALSE` to `collect(metrics)`:
+```{r}
+collect_metrics(rf_res, summarize = FALSE)
+```
+
+Getting the assessment set predictions:
+```{r}
+assess_res <- collect_predictions(rf_res)
+assess_res
+```
+
+Plotting the predictions is helpful in understanding where the model failed.  
+
+Comparing the observed and held-out predicted values:
+```{r}
+assess_res |> 
+  ggplot(aes(x = Sale_Price, y = .pred)) +
+  geom_point(alpha = 0.15) +
+  geom_abline(color = "red") +
+  coord_obs_pred() +
+  ylab("Predicted")
+```
+
+
+Finding out which rows were overpredicted by the model:
+```{r}
+over_predicted <- assess_res |> 
+  mutate(residual = Sale_Price - .pred) |> 
+  arrange(desc(abs(residual))) |> 
+  slice(1:2) 
+
+over_predicted
+```
+
+
+Finding out which hourses were overpredicted by the model based on the row number above:
+```{r}
+ames_train |> 
+  slice(over_predicted$.row) |> 
+  select(Gr_Liv_Area, Neighborhood, Year_Built, Bedroom_AbvGr, Full_Bath)
+```
+
+Identifying examples like these with especially poor performance can help us follow up and investigate why these specific predictors are so poor.  
+
+
+Using the validation set instead of cross-validation:
+```{r}
+set.seed(52)
+
+# Put 60% into training, 20% in validation, 20% in testing
+ames_val_split <- initial_validation_split(ames, prop = c(0.6, 0.2))
+ames_val_split
+
+# Object used for resampling
+val_set <- validation_set(ames_val_split)
+val_set
+
+val_res <- rf_wflow |> fit_resamples(resamples = val_set)
+
+val_res
+
+collect_metrics(val_res)
+```
+
+
+The results are much closer to the test set results than to the resubstitution estimates of performance.  
+
+
+## Parallel processing
+
+The **tune** package and the **foreach** package are used to facilitate parallel computations. This means that computations could be split across processors on the same computer or across different computers, depending on the chosen technology.  
+
+Viewing the number of possible worker processes on a single computer using the **parallel** package:
+```{r}
+# The number of physical cores in the hardware:
+parallel::detectCores(logical = FALSE)
+
+# The number of possible independent processes that can be
+# simultaneously used:
+parallel::detectCores(logical = TRUE)
+```
+
+
+These can be different if the processors are using hyperthreading or another equivalent technology which creates virtual cores for each physical core.
+
+Splitting computations by threads in a Unix-like system like Linux and macOS:
+```r
+# for Unix-like systems
+library(doMC)
+registerDoMC(cores = 2)
+
+# Now run fit_resamples()... 
+```
+
+Resetting the computations to sequential processing:
+```r
+registerDoSEQ()
+```
+
+Parallelizing computations using network sockets:
+```r
+# for all operating systems
+library(doParallel)
+
+# create a cluster object and then register:
+cl <- makePSOCKcluster(2)
+registerDoParallel(cl)
+
+# Now run fit_resamples()...
+
+stopCluster(cl)
+```
+
+## Saving the resampled objects 
+
+Extracting the linear regression model using the recipe from chapter 8: 
+```{r}
+extract_recipe(lm_fit, estimated = TRUE)
+```
+
+Saving hte linear model coefficients for a fitted model object from a workflow:
+```{r}
+get_model <- function(x) {
+  extract_fit_parsnip(x) |> tidy()
+}
+
+# testing the function
+get_model(lm_fit)
+```
+
+Applying the function to the ten resampled fits:
+```{r}
+ctrl <- control_resamples(extract = get_model)
+
+ctrl
+
+lm_res <- lm_wflow |> fit_resamples(resamples = ames_folds, control = ctrl)
+lm_res
+```
+
+Looking into the `.extracts` column with nested tibbles:
+```{r}
+lm_res$.extracts[[1]]
+
+# Getting the results
+lm_res$.extracts[[1]][[1]]
+```
+
+This might be a convoluted method for saving the model results -- however, there is a method to the madness, so to speak. The `extract` function is flexible and does not assume that the user will only save a single tibble per resample.  
+
+Collecting and flattening out all of the results:
+```{r}
+all_coef <- map_dfr(lm_res$.extracts, ~ .x[[1]][[1]])
+all_coef
+
+# Show the replicates for a single predictor:
+filter(all_coef, term == "Year_Built")
+```
+
+
+
+
+
+
