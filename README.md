@@ -16,7 +16,7 @@ Modeling Basics
 
 Tools for Creating Effective Models  
 - [x] 10. Resampling for Evaluating Performance  
-- [ ] 11. Comparing Models with Resampling  
+- [x] 11. Comparing Models with Resampling  
 - [ ] 12. Model Tuning and the Dangers of Overfitting  
 - [ ] 13. Grid Search  
 - [ ] 14. Iterative Search  
